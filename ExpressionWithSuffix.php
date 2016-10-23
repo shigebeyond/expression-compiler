@@ -32,6 +32,8 @@ class ExpressionWithSuffix
 			'-' => 1,
 			'*' => 2,
 			'/' => 2,
+			'(' => 3,
+			')' => 0,
 	);
 
 	/**
@@ -117,12 +119,12 @@ class ExpressionWithSuffix
 
 	/**
 	 * 运算
-	 * @param array $suffix_expr
+	 * @param array $suffix_expr 后缀表达式的元素
 	 * @return mixed
 	 */
 	public static function calculate(array $suffix_expr)
 	{
-		$value_stack = array(); // 值的堆栈
+		$value_stack = array(); // 值的堆栈，用于缓存那些还没有用到的运算符的数值（还有中间的运算结果）
 		foreach ($suffix_expr as $item)
 		{
 			if(isset(static::$operators[$item])) // 对符号：直接从值的堆栈中取得两个值来运算

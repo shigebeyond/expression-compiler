@@ -12,12 +12,6 @@ abstract class Node
 	public $parent;
 	
 	/**
-	 * 位置，用于定位是否包含在某个子表达式之内
-	 * @var int
-	 */
-	public $offset;
-	
-	/**
 	 * 运算
 	 * @return int|float
 	 */
@@ -109,11 +103,6 @@ class OperatorNode extends Node
 	
 	public function __construct($operator, $left = NULL, $right = NULL)
 	{
-		if(is_array($operator)) // 值+位置
-		{
-			list($operator, $offset) = $operator;
-			$this->offset = $offset;
-		}
 		$this->operator = $operator;
 		$this->left = $left;
 		$this->right = $right;
@@ -223,11 +212,6 @@ class ValueNode extends Node
 	
 	public function __construct($value = NULL, $parent = NULL)
 	{
-		if(is_array($value)) // 值+位置
-		{
-			list($value, $offset) = $value;
-			$this->offset = $offset;
-		}
 		$this->value = $value;
 		$this->parent = $parent;
 	}
@@ -275,28 +259,6 @@ class ValueNode extends Node
  */
 class SubNode extends ValueNode
 {
-	/**
-	 * 开始位置
-	 * @var int
-	 */
-	public $start;
-
-	/**
-	 * 结束位置
-	 * @var int
-	 */
-	public $end;
-	
-	/**
-	 * 是否包含某个子节点
-	 * @param Node $node
-	 * @return boolean
-	 */
-	public function contains($node)
-	{
-		return $this->start <= $node->offset && $this->end >= $node->offset;
-	}
-	
 	/**
 	 * 运算
 	 * @return int|float
@@ -354,10 +316,10 @@ class ExpressionWithTree
 	const REGX_SUB = '/[\(\)]/';
 	
 	/**
-	 * 符号正则: + - * /
+	 * 符号正则: + - * / ( )
 	 * @var string
 	 */
-	const REGX_OPERATOR = '/[\+\-\*\/]/';
+	const REGX_OPERATOR = '/[\+\-\*\/\(\)]/';
 	
 	/**
 	 * 数值正则: 非括号 非符号
@@ -370,7 +332,7 @@ class ExpressionWithTree
 	 * @param string $exp
 	 * @return Node
 	 */
-	/* public static function compile($exp)
+	public static function compile($exp)
 	{
 		// 1 没有符号
 		if(!preg_match_all(static::REGX_OPERATOR, $exp, $matches))
@@ -397,110 +359,7 @@ class ExpressionWithTree
 		}
 		
 		return $last->root();
-	}  */
-	
-	/**
-	 * 编译表达式为语法树 -- 带(子表达式)
-	 * @param string $exp
-	 * @return Node
-	 */
-	public static function compile($exp)
-	{
-		// 0 编译子表达式 => 子表达式的有序列表 => 按范围有小到大有序 
-		$subOL = static::compileSubNodeOrderList($exp);
-		
-		// 1 没有符号
-		if(!preg_match_all(static::REGX_OPERATOR, $exp, $matches, PREG_OFFSET_CAPTURE)) // 带位置
-		{
-			$exp = preg_replace(static::REGX_SUB, '', $exp); // 去掉括号
-			return new ValueNode($exp);
-		}
-		
-		// 2 有符号
-		// 2.1 获得符号与数值
-		// 获得符号
-		$ops = $matches[0];
-		unset($matches);
-		
-		// 获得数值
-		//$values = preg_split(static::REGX_OPERATOR, $exp); //因为支持了()，因此不能仅以符号作为分割来获得数值
-		if(!preg_match_all(static::REGX_VALUE, $exp, $matches, PREG_OFFSET_CAPTURE)) // 带位置
-		{
-			throw new Exception("表达式格式错误：没有数值");
-		}
-		$values = $matches[0];
-		unset($matches);
-		
-		// 2.2 构建树
-		// 2.2.1 获得顶级子节点
-		$child = new ValueNode($values[0]);
-		$children = array($child); 
-		foreach ($ops as $i => $op_ofs)
-		{
-			// 构建运算符节点
-			$children[] = $child = new OperatorNode($op_ofs);
-			
-			// 构建数值节点
-			$children[] = $child = new ValueNode($values[$i+1]);
-		}
-		
-		// 2.2.2 将括号内的内部子节点，直接替换为子表达式节点
-		foreach ($subOL as $sub)
-		{
-			// 收集当前子表达式的内部子节点
-			foreach ($children as $i => $child)
-			{
-				// 检查 子节点 是否在 当前子表达式内部
-				if($sub->contains($child)) 
-				{
-					// 用子表达式来替换内部子节点
-					if($sub->value === NULL) // 第一个
-						$children[$i] = $sub; // 将子表达式节点放入顶级节点中
-					else 
-						unset($children[$i]); // 从顶级节点中删除内部子节点
-					
-					// 将内部子节点 加入到 当前子表达式
-					$sub->subAdd($child);
-				}
-			}
-		}
-		
-		// 2.2.3 处理顶级子节点（此时顶级子节点已不存在（子表达式的内部节点），因为他们已用子表达式替换）
-		$last = array_shift($children);
-		$last = $last->addAll($children);
-		unset($children);
-		return $last->root();
-	}
-	
-	/**
-	 * 编译子表达式 => 返回子表达式的有序列表 => 按范围有小到大有序
-	 * @param exp
-	 */
-	private static function compileSubNodeOrderList($exp)
-	{
-		if(!preg_match_all(static::REGX_SUB, $exp, $matches, PREG_OFFSET_CAPTURE)) // 带位置
-			return array();
-		
-		$subs = array();
-		$level = 0;
-		$stack = array();
-		foreach ($matches[0] as $op_ofs)
-		{
-			list($op, $offset) = $op_ofs;
-			if($op == '(') // ( 开始
-			{
-				$stack[] = $sub = new SubNode();
-				$sub->start = $sub->offset = $offset;
-			}
-			else // ) 结束
-			{
-				$subs[] = $sub = array_pop($stack); // 弹出才记录 =>子表达式按范围有小到大有序 => 定位符号与数值时也是先从小范围的子表达式开始
-				$sub->end = $offset;
-			}
-		}
-	
-		return $subs;
-	}
+	} 
 	
 	/**
 	 * 根语法节点
